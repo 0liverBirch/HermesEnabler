@@ -131,6 +131,10 @@ final class WatchConnectivityManager: NSObject, WCSessionDelegate {
         didReceiveMessage message: [String: Any]
     ) {
         print("[WC] Message received: \(message)")
+        if message["request"] as? String == "diagnosticLog" {
+            print("[WC] iPhone requested the diagnostic log")
+            _ = transferDiagnosticLog()
+        }
     }
     
     struct PendingBackup {
@@ -294,5 +298,38 @@ extension WatchConnectivityManager {
         print("[WC] Transfer: \(transfer)")
         print("[WC] Transfer queued: \(transfer.isTransferring)")
     }
-    
+
+    // MARK: - Diagnostic log transfer to iPhone
+
+    // Sends Documents/bqtool.log to the Companion app via WatchConnectivity
+    // file transfer (the same route the MG backup already uses). ShareLink
+    // on watchOS did not work for this file, so this is the reliable route.
+    // Returns false when there is no log yet or the session is not active.
+    @discardableResult
+    func transferDiagnosticLog() -> Bool {
+        let session = WCSession.default
+
+        guard session.activationState == .activated else {
+            print("[WC] Session not activated, cannot send log")
+            return false
+        }
+
+        let logPath: String? = BQLogPath()
+        guard let logPath, FileManager.default.fileExists(atPath: logPath) else {
+            print("[WC] No diagnostic log file yet")
+            return false
+        }
+
+        let sourceURL = URL(fileURLWithPath: logPath)
+        let metadata: [String: Any] = [
+            "type": "diagnosticLog",
+            "fileName": "bqtool.log",
+            "transferDate": Date().timeIntervalSince1970
+        ]
+
+        let transfer = session.transferFile(sourceURL, metadata: metadata)
+        print("[WC] Diagnostic log transfer queued: \(transfer.isTransferring)")
+        return true
+    }
+
 }
