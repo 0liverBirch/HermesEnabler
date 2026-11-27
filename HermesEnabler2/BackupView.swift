@@ -86,6 +86,15 @@ struct BackupView: View {
                 }
             }
 
+            Section("Diagnostics") {
+                NavigationLink { DiagnosticsView() } label: {
+                    Label("Diagnostics", systemImage: "info.circle")
+                }
+                Text("Shows the app group this build sees, the Class-2 fallback toggle, and the app log.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Status") { Text(LocalizedStringKey(model.message))
                 .font(.footnote)
                 .foregroundStyle(.secondary) }
