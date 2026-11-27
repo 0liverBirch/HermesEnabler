@@ -26,6 +26,8 @@ struct ContentView: View {
                     WatchInstallationCard(watchManager: watchManager)
                     LatestBackupCard(watchManager: watchManager)
 
+                    diagnosticLogSection
+
                     actionButtons
                 }
                 .padding()
@@ -70,6 +72,58 @@ struct ContentView: View {
                 watchManager.loadBackupHistory()
             }
         }
+    }
+
+    // MARK: - Diagnostic log
+
+    private var diagnosticLogSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Diagnostic Log", systemImage: "info.circle")
+                .font(.headline)
+
+            Text(watchManager.diagnosticLogStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let logText = watchManager.diagnosticLogText {
+                if let date = watchManager.diagnosticLogDate {
+                    Text(date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                ScrollView {
+                    Text(String(logText.suffix(4000)))
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 220)
+            } else {
+                Text("No log received yet. On the Watch, open Diagnostics and tap “Send log to iPhone”.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    _ = watchManager.requestDiagnosticLog()
+                } label: {
+                    Label("Request Log", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(.bordered)
+
+                if let url = watchManager.diagnosticLogExportURL() {
+                    Button {
+                        shareURL = ShareItem(url: url)
+                    } label: {
+                        Label("Share Log", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding()
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - Main actions
