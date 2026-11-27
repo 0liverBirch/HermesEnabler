@@ -12,6 +12,7 @@ struct DiagnosticsView: View {
     @State private var groupRoot = "(none)"
     @State private var logPath = ""
     @State private var logText = "No log yet. Try enabling a face first, then come back here and tap Refresh log."
+    @State private var sendStatus = ""
 
     var body: some View {
         List {
@@ -39,8 +40,17 @@ struct DiagnosticsView: View {
                 Button("Refresh log") {
                     refresh()
                 }
-                if !logPath.isEmpty, FileManager.default.fileExists(atPath: logPath) {
-                    ShareLink("Share log", item: URL(fileURLWithPath: logPath))
+                Button("Send log to iPhone") {
+                    if WatchConnectivityManager.shared.transferDiagnosticLog() {
+                        sendStatus = "Log sent — open HermesEnabler on your iPhone to read it."
+                    } else {
+                        sendStatus = "Could not send — no log yet, or the Watch session is not active."
+                    }
+                }
+                if !sendStatus.isEmpty {
+                    Text(sendStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 Text(logText)
                     .font(.system(.caption, design: .monospaced))
