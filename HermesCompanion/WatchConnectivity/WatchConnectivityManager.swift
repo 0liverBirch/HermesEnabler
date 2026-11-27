@@ -34,6 +34,12 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     @Published var backupStatus = String(localized: "No Backups")
     @Published var lastVerificationMessage = ""
 
+    // MARK: - Diagnostic log (received from the Watch)
+
+    @Published var diagnosticLogText: String?
+    @Published var diagnosticLogDate: Date?
+    @Published var diagnosticLogStatus = String(localized: "No diagnostic log received yet.")
+
     private var session: WCSession?
 
     // MARK: - Backup model
@@ -165,6 +171,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
         super.init()
 
         loadBackupHistory()
+        loadDiagnosticLog()
 
         guard WCSession.isSupported() else {
             print("[WC] WatchConnectivity not supported")
@@ -589,6 +596,80 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     var latestBackup: BackupRecord? {
         backups.sorted { $0.date > $1.date }.first
     }
+
+    // MARK: - Diagnostic log
+
+    private static func diagnosticLogURL() throws -> URL {
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = support.appendingPathComponent("HermesEnabler", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("bqtool.log")
+    }
+
+    func loadDiagnosticLog() {
+        do {
+            let url = try Self.diagnosticLogURL()
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty else {
+                return
+            }
+            diagnosticLogText = text
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) {
+                diagnosticLogDate = attributes[.modificationDate] as? Date
+            }
+            diagnosticLogStatus = String(localized: "Diagnostic log received.")
+        } catch {
+            print("[WC] Diagnostic log load error: \(error.localizedDescription)")
+        }
+    }
+
+    private static func storeDiagnosticLog(data: Data, metadata: [String: Any]?) throws {
+        guard !data.isEmpty, let text = String(data: data, encoding: .utf8), !text.isEmpty else {
+            throw NSError(
+                domain: "HermesCompanion.DiagnosticLog",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "The received log is empty.")]
+            )
+        }
+        let url = try diagnosticLogURL()
+        try data.write(to: url, options: .atomic)
+        print("[WC] Diagnostic log stored: \(url.path), \(data.count) bytes")
+    }
+
+    func diagnosticLogExportURL() -> URL? {
+        do {
+            let url = try Self.diagnosticLogURL()
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return url
+        } catch {
+            print("[WC] Diagnostic log URL error: \(error)")
+            return nil
+        }
+    }
+
+    // Asks the Watch to send its log. Needs the Watch to be reachable;
+    // otherwise use "Send log to iPhone" on the Watch itself, which queues
+    // a file transfer that delivers when the Watch is next in range.
+    func requestDiagnosticLog() -> Bool {
+        guard let session else {
+            diagnosticLogStatus = String(localized: "No WatchConnectivity session.")
+            return false
+        }
+        guard session.activationState == .activated, session.isReachable else {
+            diagnosticLogStatus = String(localized: "Watch is not reachable right now. Send the log from the Watch instead.")
+            return false
+        }
+        session.sendMessage(["request": "diagnosticLog"], replyHandler: nil) { error in
+            print("[WC] Log request failed: \(error.localizedDescription)")
+        }
+        diagnosticLogStatus = String(localized: "Log requested from the Watch…")
+        return true
+    }
 }
 
 // MARK: - WCSessionDelegate
@@ -639,12 +720,24 @@ extension WatchConnectivityManager: WCSessionDelegate {
         _ session: WCSession,
         didReceive file: WCSessionFile
     ) {
-        print("[WC] Backup file received")
+        print("[WC] File received")
 
         // WCSession removes its temporary file after this delegate returns.
         do {
             let data = try Data(contentsOf: file.fileURL)
             let metadata = file.metadata
+            if metadata?["type"] as? String == "diagnosticLog" {
+                Task { @MainActor in
+                    do {
+                        try Self.storeDiagnosticLog(data: data, metadata: metadata)
+                        self.loadDiagnosticLog()
+                        self.diagnosticLogStatus = String(localized: "Diagnostic log received from the Watch.")
+                    } catch {
+                        self.diagnosticLogStatus = String(localized: "Log rejected: \(error.localizedDescription)")
+                    }
+                }
+                return
+            }
             Task { @MainActor in
                 do {
                     let record = try Self.storeBackup(data: data, metadata: metadata)
@@ -654,7 +747,7 @@ extension WatchConnectivityManager: WCSessionDelegate {
                 }
             }
         } catch {
-            print("[WC] Could not read transferred backup: \(error.localizedDescription)")
+            print("[WC] Could not read transferred file: \(error.localizedDescription)")
         }
     }
 
